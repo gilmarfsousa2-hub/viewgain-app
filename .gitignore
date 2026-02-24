@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env_backup
+api/__pycache__
+backend.log
+*.log
+analysis_cache.json
+.DS_Store
