@@ -75,11 +75,12 @@ interface TradeSetup {
 export default function App() {
     const [image, setImage] = useState<string | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
-    const [result, setResult] = useState<TradeSetup | null>(null);
+    const [result, setResult] = useState<any>(null);
     const [status, setStatus] = useState('Aguardando gráfico...');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const cameraInputRef = useRef<HTMLInputElement>(null);
+    const [provider, setProvider] = useState<string | null>(null);
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -98,6 +99,7 @@ export default function App() {
 
     const analyzeChart = async (file: File) => {
         setResult(null);
+        setProvider(null);
         setErrorMsg(null);
         setAnalyzing(true);
         setStatus('ANALISANDO GRÁFICO...');
@@ -110,6 +112,7 @@ export default function App() {
             });
             if (response.data.success) {
                 setResult(response.data.setup);
+                setProvider(response.data.provider);
             } else {
                 setErrorMsg(response.data.message || 'Erro desconhecido na IA');
             }
@@ -192,8 +195,15 @@ export default function App() {
                             <motion.div key="result" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
                                 {/* CARD PRINCIPAL */}
                                 <div className="main-card">
-                                    <div className="badge" style={{ backgroundColor: result.operacao === 'COMPRA' ? '#34C759' : '#FF3B30' }}>
-                                        {result.operacao === 'COMPRA' ? '⬆ COMPRA' : '⬇ VENDA'}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                                        <div className="badge" style={{ margin: 0, backgroundColor: result.operacao === 'COMPRA' ? '#34C759' : '#FF3B30' }}>
+                                            {result.operacao === 'COMPRA' ? '⬆ COMPRA' : '⬇ VENDA'}
+                                        </div>
+                                        {provider && (
+                                            <div style={{ fontSize: '10px', color: '#8E8E93', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                                                IA: {provider}
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="main-title">{result.direcao}</div>
                                     <div className="main-subtitle">Confiança: {result.analise_detalhada?.confianca || 0}%</div>

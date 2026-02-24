@@ -164,7 +164,8 @@ def calcular_setup_profissional(analise: Dict) -> Dict:
 @app.post("/api/analyze")
 @app.post("/analyze")
 async def analyze_chart(file: UploadFile = File(...)):
-    if not client: return {"success": False, "message": "API Key configurada incorretamente."}
+    if not client and not anthropic_client: 
+        return {"success": False, "message": "Nenhuma API Key (Claude ou Gemini) configurada."}
     
     content = await file.read()
     
@@ -215,7 +216,11 @@ async def analyze_chart(file: UploadFile = File(...)):
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0].strip()
                 
-            result = {"success": True, "setup": calcular_setup_profissional(json.loads(response_text))}
+            result = {
+                "success": True, 
+                "setup": calcular_setup_profissional(json.loads(response_text)),
+                "provider": "Claude 3.5 Sonnet"
+            }
             
             ANALYSIS_CACHE[file_hash] = {
                 'timestamp': time.time(),
@@ -239,7 +244,11 @@ async def analyze_chart(file: UploadFile = File(...)):
                 config=types.GenerateContentConfig(response_mime_type='application/json')
             )
             
-            result = {"success": True, "setup": calcular_setup_profissional(json.loads(response.text))}
+            result = {
+                "success": True, 
+                "setup": calcular_setup_profissional(json.loads(response.text)),
+                "provider": f"Gemini ({model_name})"
+            }
             
             # Salvar no cache
             ANALYSIS_CACHE[file_hash] = {
