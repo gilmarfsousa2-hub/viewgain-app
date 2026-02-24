@@ -79,6 +79,7 @@ export default function App() {
     const [status, setStatus] = useState('Aguardando gráfico...');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const cameraInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -123,19 +124,37 @@ export default function App() {
         <div className="min-h-screen">
             <div className="header">
                 <div className="logo">ViewGain</div>
-                <button className="camera-btn" onClick={() => fileInputRef.current?.click()}>📷</button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <button title="Galeria" className="camera-btn" onClick={() => fileInputRef.current?.click()}>📁</button>
+                    <button title="Câmera" className="camera-btn" onClick={() => cameraInputRef.current?.click()}>📷</button>
+                </div>
             </div>
 
             <div className="container">
                 {!image ? (
-                    <div
-                        onClick={() => fileInputRef.current?.click()}
-                        className="main-card"
-                        style={{ textAlign: 'center', cursor: 'pointer', padding: '60px 20px' }}
-                    >
-                        <div style={{ fontSize: '48px', marginBottom: '20px' }}>📷</div>
-                        <div className="main-title" style={{ fontSize: '24px' }}>Capturar Gráfico</div>
-                        <div className="main-subtitle">Clique para enviar seu gráfico</div>
+                    <div className="main-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+                        <div style={{ fontSize: '48px', marginBottom: '20px' }}>📊</div>
+                        <div className="main-title" style={{ fontSize: '24px' }}>Analise seu Gráfico</div>
+                        <div className="main-subtitle" style={{ marginBottom: '30px' }}>Escolha como enviar a imagem</div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                            <button
+                                onClick={() => cameraInputRef.current?.click()}
+                                className="action-button"
+                                style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF' }}
+                            >
+                                <span style={{ fontSize: '24px' }}>📷</span>
+                                <span style={{ fontSize: '14px' }}>Tirar Foto</span>
+                            </button>
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                className="action-button"
+                                style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', background: '#34C759' }}
+                            >
+                                <span style={{ fontSize: '24px' }}>📁</span>
+                                <span style={{ fontSize: '14px' }}>Galeria</span>
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <AnimatePresence mode="wait">
@@ -317,6 +336,7 @@ export default function App() {
             </div>
 
             <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+            <input type="file" ref={cameraInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
         </div>
     );
 }
