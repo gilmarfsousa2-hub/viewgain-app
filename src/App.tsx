@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -72,6 +72,14 @@ interface TradeSetup {
     };
 }
 
+interface HistoryItem {
+    id: string;
+    timestamp: number;
+    image: string;
+    result: any;
+    provider: string | null;
+}
+
 export default function App() {
     const [image, setImage] = useState<string | null>(null);
     const [analyzing, setAnalyzing] = useState(false);
@@ -81,6 +89,24 @@ export default function App() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const cameraInputRef = useRef<HTMLInputElement>(null);
     const [provider, setProvider] = useState<string | null>(null);
+    const [history, setHistory] = useState<HistoryItem[]>([]);
+
+    // Carregar histórico ao iniciar
+    useEffect(() => {
+        const savedHistory = localStorage.getItem('viewgain_history');
+        if (savedHistory) {
+            try {
+                setHistory(JSON.parse(savedHistory));
+            } catch (e) {
+                console.error("Erro ao carregar histórico", e);
+            }
+        }
+    }, []);
+
+    // Salvar histórico sempre que mudar
+    useEffect(() => {
+        localStorage.setItem('viewgain_history', JSON.stringify(history));
+    }, [history]);
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -88,8 +114,9 @@ export default function App() {
 
         const reader = new FileReader();
         reader.onloadend = () => {
-            setImage(reader.result as string);
-            analyzeChart(file);
+            const base64Image = reader.result as string;
+            setImage(base64Image);
+            analyzeChart(file, base64Image);
         };
         reader.readAsDataURL(file);
 
@@ -97,7 +124,7 @@ export default function App() {
         e.target.value = '';
     };
 
-    const analyzeChart = async (file: File) => {
+    const analyzeChart = async (file: File, base64Image: string) => {
         setResult(null);
         setProvider(null);
         setErrorMsg(null);
@@ -111,8 +138,20 @@ export default function App() {
                 timeout: 60000 // 60s for slow IA
             });
             if (response.data.success) {
-                setResult(response.data.setup);
-                setProvider(response.data.provider);
+                const analysisResult = response.data.setup;
+                const usedProvider = response.data.provider;
+                setResult(analysisResult);
+                setProvider(usedProvider);
+
+                // Adicionar ao histórico
+                const newItem: HistoryItem = {
+                    id: Date.now().toString(),
+                    timestamp: Date.now(),
+                    image: base64Image,
+                    result: analysisResult,
+                    provider: usedProvider
+                };
+                setHistory(prev => [newItem, ...prev].slice(0, 10)); // Manter apenas as últimas 10
             } else {
                 setErrorMsg(response.data.message || 'Erro desconhecido na IA');
             }
@@ -123,10 +162,23 @@ export default function App() {
         }
     };
 
+    const loadFromHistory = (item: HistoryItem) => {
+        setImage(item.image);
+        setResult(item.result);
+        setProvider(item.provider);
+        setErrorMsg(null);
+        setAnalyzing(false);
+    };
+
+    const deleteHistoryItem = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        setHistory(prev => prev.filter(item => item.id !== id));
+    };
+
     return (
         <div className="min-h-screen">
             <div className="header">
-                <div className="logo">ViewGain</div>
+                <div className="logo" onClick={() => { setImage(null); setResult(null); }} style={{ cursor: 'pointer' }}>ViewGain</div>
                 <div style={{ display: 'flex', gap: '10px' }}>
                     <button title="Galeria" className="camera-btn" onClick={() => fileInputRef.current?.click()}>📁</button>
                     <button title="Câmera" className="camera-btn" onClick={() => cameraInputRef.current?.click()}>📷</button>
@@ -135,29 +187,91 @@ export default function App() {
 
             <div className="container">
                 {!image ? (
-                    <div className="main-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-                        <div style={{ fontSize: '48px', marginBottom: '20px' }}>📊</div>
-                        <div className="main-title" style={{ fontSize: '24px' }}>Analise seu Gráfico</div>
-                        <div className="main-subtitle" style={{ marginBottom: '30px' }}>Escolha como enviar a imagem</div>
+                    <div className="main-card-container">
+                        <div className="main-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
+                            <div style={{ fontSize: '48px', marginBottom: '20px' }}>📊</div>
+                            <div className="main-title" style={{ fontSize: '24px' }}>Analise seu Gráfico</div>
+                            <div className="main-subtitle" style={{ marginBottom: '30px' }}>Escolha como enviar a imagem</div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                            <button
-                                onClick={() => cameraInputRef.current?.click()}
-                                className="action-button"
-                                style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF' }}
-                            >
-                                <span style={{ fontSize: '24px' }}>📷</span>
-                                <span style={{ fontSize: '14px' }}>Tirar Foto</span>
-                            </button>
-                            <button
-                                onClick={() => fileInputRef.current?.click()}
-                                className="action-button"
-                                style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', background: '#34C759' }}
-                            >
-                                <span style={{ fontSize: '24px' }}>📁</span>
-                                <span style={{ fontSize: '14px' }}>Galeria</span>
-                            </button>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                                <button
+                                    onClick={() => cameraInputRef.current?.click()}
+                                    className="action-button"
+                                    style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF' }}
+                                >
+                                    <span style={{ fontSize: '24px' }}>📷</span>
+                                    <span style={{ fontSize: '14px' }}>Tirar Foto</span>
+                                </button>
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="action-button"
+                                    style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center', justifyContent: 'center', background: '#34C759' }}
+                                >
+                                    <span style={{ fontSize: '24px' }}>📁</span>
+                                    <span style={{ fontSize: '14px' }}>Galeria</span>
+                                </button>
+                            </div>
                         </div>
+
+                        {history.length > 0 && (
+                            <div style={{ marginTop: '40px' }}>
+                                <div className="section-title">🕒 Análises Recentes</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {history.map((item) => (
+                                        <div
+                                            key={item.id}
+                                            onClick={() => loadFromHistory(item)}
+                                            className="main-card"
+                                            style={{
+                                                padding: '12px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '15px',
+                                                cursor: 'pointer',
+                                                border: '1px solid #e5e5ea',
+                                                background: '#fcfcfd'
+                                            }}
+                                        >
+                                            <div style={{
+                                                width: '60px',
+                                                height: '60px',
+                                                borderRadius: '8px',
+                                                overflow: 'hidden',
+                                                background: '#eee',
+                                                flexShrink: 0
+                                            }}>
+                                                <img src={item.image} alt="Trade" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            </div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{
+                                                    fontSize: '14px',
+                                                    fontWeight: 'bold',
+                                                    color: item.result.operacao === 'COMPRA' ? '#34C759' : '#FF3B30'
+                                                }}>
+                                                    {item.result.operacao === 'COMPRA' ? '⬆ COMPRA' : '⬇ VENDA'} • {item.result.analise_detalhada?.confianca}%
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: '#8E8E93', marginTop: '2px' }}>
+                                                    {new Date(item.timestamp).toLocaleString()}
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={(e) => deleteHistoryItem(e, item.id)}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    color: '#FF3B30',
+                                                    padding: '10px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '18px'
+                                                }}
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <AnimatePresence mode="wait">
@@ -216,7 +330,7 @@ export default function App() {
                                 {result.padroes_identificados?.length > 0 && (
                                     <div style={{ marginBottom: '30px' }}>
                                         <div className="section-title">🎯 Padrões Identificados</div>
-                                        {result.padroes_identificados.map((padrao, idx) => (
+                                        {result.padroes_identificados.map((padrao: any, idx: number) => (
                                             <div key={idx} className="padrao-card" style={{ borderLeftColor: result.operacao === 'COMPRA' ? '#34C759' : '#FF3B30' }}>
                                                 <div className="padrao-header">
                                                     <div className="padrao-nome">{idx + 1}. {padrao.nome}</div>
@@ -248,7 +362,7 @@ export default function App() {
                                 {result.padroes_reteste?.length > 0 && (
                                     <div style={{ marginBottom: '30px' }}>
                                         <div className="section-title">⏰ Confirmações no Reteste</div>
-                                        {result.padroes_reteste.map((padrao, idx) => (
+                                        {result.padroes_reteste.map((padrao: any, idx: number) => (
                                             <div key={idx} className="retest-card">
                                                 <div className="retest-title">{padrao.nome}</div>
                                                 <span className="detalhe-item">📍 Onde: {padrao.onde_procurar}</span>
@@ -297,7 +411,7 @@ export default function App() {
                                     <div style={{ marginBottom: '30px' }}>
                                         <div className="section-title">📊 Confluências ({result.confluencias.lista.length} fatores)</div>
                                         <div className="main-card" style={{ padding: '16px' }}>
-                                            {result.confluencias.lista.map((item, idx) => (
+                                            {result.confluencias.lista.map((item: any, idx: number) => (
                                                 <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', fontSize: '14px', color: '#48484a' }}>
                                                     <span>✅</span>
                                                     <span>{item}</span>
@@ -338,7 +452,7 @@ export default function App() {
                                     📷 Nova Análise
                                 </button>
 
-                                <div className="footer">ViewGain v3.0 • Institutional Terminal</div>
+                                <div className="footer">ViewGain v3.2 • Institutional Terminal</div>
                             </motion.div>
                         )}
                     </AnimatePresence>
