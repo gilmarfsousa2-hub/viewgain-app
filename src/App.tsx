@@ -135,7 +135,7 @@ export default function App() {
         try {
             const response = await axios.post(API_URL, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
-                timeout: 60000 // 60s for slow IA
+                timeout: 90000 // 90s for mobile safety
             });
             if (response.data.success) {
                 const analysisResult = response.data.setup;
@@ -143,7 +143,6 @@ export default function App() {
                 setResult(analysisResult);
                 setProvider(usedProvider);
 
-                // Adicionar ao histórico
                 const newItem: HistoryItem = {
                     id: Date.now().toString(),
                     timestamp: Date.now(),
@@ -151,12 +150,16 @@ export default function App() {
                     result: analysisResult,
                     provider: usedProvider
                 };
-                setHistory(prev => [newItem, ...prev].slice(0, 10)); // Manter apenas as últimas 10
+                setHistory(prev => [newItem, ...prev].slice(0, 10));
             } else {
                 setErrorMsg(response.data.message || 'Erro desconhecido na IA');
             }
         } catch (error: any) {
-            setErrorMsg(error.response?.data?.detail || error.message || 'Erro de conexão com o servidor');
+            if (error.code === 'ECONNABORTED') {
+                setErrorMsg('⏱️ Tempo esgotado (Timeout). 💡 Tente uma imagem menor.');
+            } else {
+                setErrorMsg(error.response?.data?.message || error.response?.data?.detail || error.message || 'Erro de conexão');
+            }
         } finally {
             setAnalyzing(false);
         }

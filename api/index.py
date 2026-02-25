@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 import anthropic
+from PIL import Image
+import io
 
 load_dotenv()
 
@@ -40,7 +42,36 @@ def save_cache():
         logger.error(f"Erro ao salvar cache: {e}")
 
 load_cache()
-CACHE_EXPIRY = 86400 * 7 # 7 dias (análise técnica de gráfico estático não muda)
+CACHE_EXPIRY = 86400 * 7 # 7 dias
+
+def optimize_image(content: bytes, max_size_mb: float = 5.0) -> bytes:
+    """Otimiza imagem se for maior que o limite configurado."""
+    size_mb = len(content) / (1024 * 1024)
+    if size_mb <= max_size_mb:
+        return content
+    
+    logger.info(f"Otimizando imagem de {size_mb:.2f}MB...")
+    try:
+        img = Image.open(io.BytesIO(content))
+        # Converter para RGB se necessário (remover alpha channel)
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        
+        # Redimensionar se for muito grande
+        max_dim = 2000
+        if max(img.width, img.height) > max_dim:
+            ratio = max_dim / max(img.width, img.height)
+            new_size = (int(img.width * ratio), int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+            
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        optimized_content = output.getvalue()
+        logger.info(f"Imagem otimizada: {size_mb:.2f}MB -> {len(optimized_content)/(1024*1024):.2f}MB")
+        return optimized_content
+    except Exception as e:
+        logger.error(f"Erro ao otimizar imagem: {e}")
+        return content
 
 app = FastAPI(title="ViewGain API")
 
@@ -161,85 +192,95 @@ def calcular_setup_profissional(analise: Dict) -> Dict:
 async def analyze_chart(file: UploadFile = File(...)):
     start_time = time.time()
     if not client and not anthropic_client: 
-        return {"success": False, "message": "Nenhuma API Key (Claude ou Gemini) configurada."}
+        return {"success": False, "message": "Nenhuma API Key configurada."}
     
     content = await file.read()
     
-    # 1. Verificar Cache
-    file_hash = hashlib.sha256(content).hexdigest()
+    # 1. Otimizar Imagem
+    optimized_content = optimize_image(content)
+    
+    # 2. Verificar Cache (usando hash da imagem otimizada para consistência)
+    file_hash = hashlib.sha256(optimized_content).hexdigest()
     if file_hash in ANALYSIS_CACHE:
         cache_entry = ANALYSIS_CACHE[file_hash]
         if time.time() - cache_entry['timestamp'] < CACHE_EXPIRY:
             logger.info("Retornando resultado do cache.")
             return cache_entry['result']
 
-    # 2. Tentar Claude primeiro (se configurado)
+    # 3. Tentar Claude com Retry e Backoff
     last_error = ""
     used_claude = False
     if anthropic_client:
-        try:
-            used_claude = True
-            logger.info("Tentando Claude 3.5 Sonnet (Timeout 12s)...")
-            base64_image = base64.b64encode(content).decode('utf-8')
-            
-            # Claude exige um prompt bem específico para JSON
-            claude_prompt = f"{PROMPT_ANALISE_PROFISSIONAL}\nResponda APENAS o JSON, sem nenhum texto antes ou depois."
-            
-            message = anthropic_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=2048,
-                timeout=12.0, # Limite agressivo para não estourar o Vercel
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": file.content_type,
-                                    "data": base64_image,
-                                },
-                            },
-                            {"type": "text", "text": claude_prompt}
-                        ],
-                    }
-                ],
-            )
-            
-            response_text = message.content[0].text
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                used_claude = True
+                wait_time = [0, 2, 5][attempt] if attempt < 3 else 0
+                if wait_time > 0:
+                    logger.info(f"Aguardando {wait_time}s antes da tentativa {attempt + 1}...")
+                    time.sleep(wait_time)
                 
-            result = {
-                "success": True, 
-                "setup": calcular_setup_profissional(json.loads(response_text)),
-                "provider": "Claude 3.5 Sonnet"
-            }
-            
-            ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
-            save_cache()
-            logger.info(f"Análise Claude concluída em {time.time() - start_time:.2f}s")
-            return result
-            
-        except Exception as e:
-            last_error = str(e)
-            logger.error(f"Claude error: {last_error}")
+                logger.info(f"Tentando Claude (Tentativa {attempt + 1}/3, Timeout 25s)...")
+                base64_image = base64.b64encode(optimized_content).decode('utf-8')
+                claude_prompt = f"{PROMPT_ANALISE_PROFISSIONAL}\nResponda APENAS o JSON."
+                
+                message = anthropic_client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=2048,
+                    timeout=25.0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/jpeg", # Pillow converte para JPEG
+                                        "data": base64_image,
+                                    },
+                                },
+                                {"type": "text", "text": claude_prompt}
+                            ],
+                        }
+                    ],
+                )
+                
+                response_text = message.content[0].text
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].split("```")[0].strip()
+                    
+                result = {
+                    "success": True, 
+                    "setup": calcular_setup_profissional(json.loads(response_text)),
+                    "provider": "Claude 3.5 Sonnet"
+                }
+                
+                ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
+                save_cache()
+                logger.info(f"Sucesso com Claude na tentativa {attempt + 1}")
+                return result
+                
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Erro Claude (Tentativa {attempt + 1}): {last_error}")
+                
+                # Se não for erro de cota ou timeout, para o retry do Claude e vai pro fallback
+                if "429" not in last_error and "timeout" not in last_error.lower():
+                    break
 
-    # 3. Tentar Gemini como fallback (Apenas modelos essenciais se Claude falhou ou não existe)
-    # Se já tentamos o Claude e deu erro, tentamos APENAS o Gemini mais rápido para evitar timeout acumulado
-    models_to_run = [MODELS_TO_TRY[0]] if used_claude else MODELS_TO_TRY
-    
+    # 4. Fallback para Gemini (Apenas se Claude falhou ou não existe)
     gemini_error = ""
-    for model_name in models_to_run:
-        if not client: break
+    if client:
         try:
-            logger.info(f"Tentando {model_name} (Fallback)...")
+            # Puxamos apenas o mais rápido para o fallback final
+            model_name = MODELS_TO_TRY[0]
+            logger.info(f"Tentando Fallback: {model_name}...")
             response = client.models.generate_content(
                 model=model_name,
-                contents=[types.Part.from_bytes(data=content, mime_type=file.content_type), PROMPT_ANALISE_PROFISSIONAL],
+                contents=[types.Part.from_bytes(data=optimized_content, mime_type="image/jpeg"), PROMPT_ANALISE_PROFISSIONAL],
                 config=types.GenerateContentConfig(response_mime_type='application/json')
             )
             
@@ -251,39 +292,48 @@ async def analyze_chart(file: UploadFile = File(...)):
             
             ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
             save_cache()
-            logger.info(f"Análise Gemini concluída em {time.time() - start_time:.2f}s")
             return result
         except Exception as e:
             gemini_error = str(e)
-            logger.error(f"Erro com {model_name}: {gemini_error}")
-            if "429" in gemini_error: continue # Tenta o próximo se existir
-            break # Erros críticos param aqui
+            logger.error(f"Erro Fallback Gemini: {gemini_error}")
 
-    # Se chegamos aqui, ambos falharam. Vamos dar uma resposta detalhada.
-    final_msg = "Falha na análise técnica."
+    # 5. Resposta Detalhada de Erro
+    final_msg = "❌ Falha na Análise Técnica"
     if used_claude:
         if "429" in last_error:
-            final_msg = "Claude: Limite de taxa atingido (429)."
+            final_msg = "🚫 Claude: Limite de taxa (429). 💡 Solução: Aguarde 1 min."
         elif "timeout" in last_error.lower():
-            final_msg = "Claude: Tempo esgotado (Timeout)."
+            final_msg = "⏱️ Claude: Tempo esgotado (Timeout). 💡 Solução: Tente imagem menor."
+        elif "credit" in last_error.lower() or "402" in last_error:
+            final_msg = "💳 Claude: Créditos esgotados. 💡 Solução: Recarregue a conta."
         else:
-            final_msg = f"Claude: {last_error}"
+            final_msg = f"❌ Claude: {last_error[:100]}"
             
         if gemini_error:
-            if "429" in gemini_error:
-                final_msg += " | Gemini: Cota esgotada."
-            else:
-                final_msg += f" | Gemini: {gemini_error}"
+            final_msg += f" | ⚠️ Gemini: {gemini_error[:50]}"
     else:
-        if "429" in gemini_error:
-            final_msg = "Gemini: Cota diária excedida."
-        else:
-            final_msg = f"Erro API: {gemini_error or last_error}"
+        final_msg = f"❌ Erro Gemini: {gemini_error[:100]}"
         
     return {"success": False, "message": final_msg}
 
 @app.get("/")
-def health_check(): return {"status": "online", "version": "3.1-debug"}
+def health_check(): 
+    return {
+        "status": "online", 
+        "timestamp": time.time(),
+        "cache_entries": len(ANALYSIS_CACHE)
+    }
+
+@app.get("/api/test-claude")
+@app.get("/test-claude")
+async def test_claude():
+    if not anthropic_client: return {"success": False, "message": "Cliente não inicializado"}
+    start = time.time()
+    try:
+        anthropic_client.models.list() # Teste de conexão simples
+        return {"success": True, "time": f"{time.time()-start:.2f}s"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/debug")
 @app.get("/debug")
