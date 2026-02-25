@@ -96,9 +96,15 @@ export default function App() {
         const savedHistory = localStorage.getItem('viewgain_history');
         if (savedHistory) {
             try {
-                setHistory(JSON.parse(savedHistory));
+                const parsed = JSON.parse(savedHistory);
+                if (Array.isArray(parsed)) {
+                    // Validar se cada item tem o que precisa para não quebrar o render
+                    const validHistory = parsed.filter(item => item && item.result && item.image);
+                    setHistory(validHistory);
+                }
             } catch (e) {
                 console.error("Erro ao carregar histórico", e);
+                localStorage.removeItem('viewgain_history'); // Limpa se estiver corrompido
             }
         }
     }, []);
