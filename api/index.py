@@ -224,28 +224,47 @@ async def analyze_chart(file: UploadFile = File(...)):
                 base64_image = base64.b64encode(optimized_content).decode('utf-8')
                 claude_prompt = f"{PROMPT_ANALISE_PROFISSIONAL}\nResponda APENAS o JSON."
                 
-                message = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-latest",
-                    max_tokens=2048,
-                    timeout=25.0,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/jpeg", # Pillow converte para JPEG
-                                        "data": base64_image,
-                                    },
-                                },
-                                {"type": "text", "text": claude_prompt}
-                            ],
-                        }
-                    ],
-                )
+                # Lista de modelos por ordem de preferência
+                CLAUDE_MODELS = ["claude-3-5-sonnet-latest", "claude-3-5-sonnet-20240620", "claude-3-haiku-20240307"]
                 
+                message = None
+                for model_id in CLAUDE_MODELS:
+                    try:
+                        logger.info(f"Testando modelo Claude: {model_id}")
+                        message = anthropic_client.messages.create(
+                            model=model_id,
+                            max_tokens=2048,
+                            timeout=25.0,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "image",
+                                            "source": {
+                                                "type": "base64",
+                                                "media_type": "image/jpeg",
+                                                "data": base64_image,
+                                            },
+                                        },
+                                        {"type": "text", "text": claude_prompt}
+                                    ],
+                                }
+                            ],
+                        )
+                        used_model = model_id
+                        break # Sucesso com este modelo
+                    except Exception as mod_err:
+                        last_error = str(mod_err)
+                        if "404" in last_error:
+                            logger.warning(f"Modelo {model_id} não encontrado (404). Tentando próximo...")
+                            continue
+                        else:
+                            raise mod_err # Outros erros (401, 429) tratados pelo try externo
+                
+                if not message:
+                    raise Exception("Nenhum modelo Claude disponível na conta.")
+
                 response_text = message.content[0].text
                 if "```json" in response_text:
                     response_text = response_text.split("```json")[1].split("```")[0].strip()
@@ -255,7 +274,7 @@ async def analyze_chart(file: UploadFile = File(...)):
                 result = {
                     "success": True, 
                     "setup": calcular_setup_profissional(json.loads(response_text)),
-                    "provider": "Claude 3.5 Sonnet"
+                    "provider": f"Claude ({used_model})"
                 }
                 
                 ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
@@ -330,15 +349,21 @@ async def test_claude():
     if not anthropic_client: return {"success": False, "message": "Cliente não inicializado"}
     start = time.time()
     try:
-        # Testar criação de mensagem simples para validar o modelo
-        msg = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-latest",
-            max_tokens=10,
-            messages=[{"role": "user", "content": "olá"}]
-        )
-        return {"success": True, "time": f"{time.time()-start:.2f}s", "model": "claude-3-5-sonnet-latest", "version": "3.5"}
+        # Tenta os 3 principais modelos
+        for model_id in ["claude-3-5-sonnet-latest", "claude-3-5-sonnet-20240620", "claude-3-haiku-20240307"]:
+            try:
+                msg = anthropic_client.messages.create(
+                    model=model_id,
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": "olá"}]
+                )
+                return {"success": True, "time": f"{time.time()-start:.2f}s", "model": model_id, "version": "3.6"}
+            except Exception as e:
+                if "404" in str(e): continue
+                raise e
+        return {"success": False, "message": "Nenhum modelo disponível nesta conta."}
     except Exception as e:
-        return {"success": False, "error": str(e), "note": "Se erro for 404, tente claude-3-5-sonnet-20240620 no painel."}
+        return {"success": False, "error": str(e), "version": "3.6-failure"}
 
 @app.get("/api/debug")
 @app.get("/debug")
@@ -359,7 +384,7 @@ def debug_status():
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "version": "3.5-latest-fix"
+        "version": "3.6-multi-model"
     }
 
 if __name__ == "__main__":
