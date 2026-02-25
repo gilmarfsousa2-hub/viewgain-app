@@ -225,13 +225,14 @@ async def analyze_chart(file: UploadFile = File(...)):
             return result
             
         except Exception as e:
-            last_error = f"Claude error: {str(e)}"
-            logger.error(last_error)
+            last_error = str(e)
+            logger.error(f"Claude error: {last_error}")
 
     # 3. Tentar Gemini como fallback (Apenas modelos essenciais se Claude falhou ou não existe)
     # Se já tentamos o Claude e deu erro, tentamos APENAS o Gemini mais rápido para evitar timeout acumulado
     models_to_run = [MODELS_TO_TRY[0]] if used_claude else MODELS_TO_TRY
     
+    gemini_error = ""
     for model_name in models_to_run:
         if not client: break
         try:
@@ -253,13 +254,33 @@ async def analyze_chart(file: UploadFile = File(...)):
             logger.info(f"Análise Gemini concluída em {time.time() - start_time:.2f}s")
             return result
         except Exception as e:
-            last_error = str(e)
-            logger.error(f"Erro com {model_name}: {last_error}")
-            if "429" in last_error: continue # Tenta o próximo se existir
+            gemini_error = str(e)
+            logger.error(f"Erro com {model_name}: {gemini_error}")
+            if "429" in gemini_error: continue # Tenta o próximo se existir
             break # Erros críticos param aqui
 
-    msg = "Cota Esgotada ou Timeout. Tente novamente." if "429" in last_error else f"Erro: {last_error}"
-    return {"success": False, "message": msg}
+    # Se chegamos aqui, ambos falharam. Vamos dar uma resposta detalhada.
+    final_msg = "Falha na análise técnica."
+    if used_claude:
+        if "429" in last_error:
+            final_msg = "Claude: Limite de taxa atingido (429)."
+        elif "timeout" in last_error.lower():
+            final_msg = "Claude: Tempo esgotado (Timeout)."
+        else:
+            final_msg = f"Claude: {last_error}"
+            
+        if gemini_error:
+            if "429" in gemini_error:
+                final_msg += " | Gemini: Cota esgotada."
+            else:
+                final_msg += f" | Gemini: {gemini_error}"
+    else:
+        if "429" in gemini_error:
+            final_msg = "Gemini: Cota diária excedida."
+        else:
+            final_msg = f"Erro API: {gemini_error or last_error}"
+        
+    return {"success": False, "message": final_msg}
 
 @app.get("/")
 def health_check(): return {"status": "online", "version": "3.1-debug"}
