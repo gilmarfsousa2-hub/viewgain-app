@@ -342,16 +342,19 @@ def debug_status():
         if not k: return None
         return f"{k[:4]}...{k[-4:]}"
     
+    raw_anthropic = os.getenv("ANTHROPIC_API_KEY", "")
+    stripped_anthropic = raw_anthropic.strip()
+    
     return {
-        "anthropic_key_present": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "anthropic_key_mask": mask_key(os.getenv("ANTHROPIC_API_KEY")),
+        "anthropic_key_present": bool(raw_anthropic),
+        "anthropic_key_raw_mask": mask_key(raw_anthropic),
+        "anthropic_key_stripped_mask": mask_key(stripped_anthropic),
+        "anthropic_key_has_whitespace": raw_anthropic != stripped_anthropic,
         "gemini_key_present": bool(os.getenv("GEMINI_API_KEY")),
-        "gemini_key_mask": mask_key(os.getenv("GEMINI_API_KEY")),
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "gemini_client_initialized": client is not None,
-        "version": "3.3-diagnostic"
+        "version": "3.4-strip-check"
     }
 
 if __name__ == "__main__":
