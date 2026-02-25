@@ -150,22 +150,46 @@ Estrutura JSON esperada:
 """
 
 def calcular_setup_profissional(analise: Dict) -> Dict:
+    def safe_float(v, default=0.0):
+        try:
+            if v is None: return default
+            return float(v)
+        except:
+            return default
+
     setup_ia = analise.get('setup', {})
-    preco_atual = analise.get('ultimo_preco', 0.0)
-    estrategia = setup_ia.get('acao', 'AGUARDAR_RETESTE')
-    entrada = setup_ia.get('entrada', preco_atual)
-    stop = setup_ia.get('stop_loss', 0.0)
-    alvo1 = setup_ia.get('alvo_1', 0.0)
-    alvo2 = setup_ia.get('alvo_2', 0.0)
+    preco_atual = safe_float(analise.get('ultimo_preco'))
+    estrategia = str(setup_ia.get('acao', 'AGUARDAR_RETESTE') or 'AGUARDAR_RETESTE')
+    entrada = safe_float(setup_ia.get('entrada'), preco_atual)
+    stop = safe_float(setup_ia.get('stop_loss'))
+    alvo1 = safe_float(setup_ia.get('alvo_1'))
+    alvo2 = safe_float(setup_ia.get('alvo_2'))
     
     risco_pontos = abs(entrada - stop) if stop > 0 and entrada > 0 else 0.0001
-    risco_pct = round((risco_pontos / entrada) * 100, 2) if entrada > 0 else 0
+    risco_pct = round((risco_pontos / entrada) * 100, 2) if entrada > 0 else 0.01
     ganho1_pct = round((abs(alvo1 - entrada) / entrada) * 100, 2) if entrada > 0 else 0
     ganho2_pct = round((abs(alvo2 - entrada) / entrada) * 100, 2) if entrada > 0 else 0
     
+    # Normalizar padrões para evitar arrays com Nones ou campos faltando
+    padroes = []
+    for p in analise.get('padroes_identificados', []):
+        if not isinstance(p, dict): continue
+        padroes.append({
+            "nome": str(p.get('nome', 'Padrão Identificado')),
+            "categoria": str(p.get('categoria', 'ESTRUTURA')),
+            "estrelas": min(max(int(safe_float(p.get('estrelas', 1))), 1), 5), # Garante 1-5
+            "localizacao_contexto": str(p.get('localizacao_contexto', 'N/A')),
+            "localizacao_preco": str(p.get('localizacao_preco', 'N/A')),
+            "qualidade": str(p.get('qualidade', 'MEDIA')),
+            "descricao_visual": str(p.get('descricao_visual', 'N/A')),
+            "por_que_importante": str(p.get('por_que_importante', 'N/A')),
+            "volume_confirmacao": bool(p.get('volume_confirmacao', False)),
+            "volume_ratio": safe_float(p.get('volume_ratio', 1.0))
+        })
+
     return {
         "status": "SETUP_PROFISSIONAL",
-        "operacao": "COMPRA" if (alvo1 > entrada or "COMPRA" in estrategia) else "VENDA",
+        "operacao": "COMPRA" if (alvo1 > entrada or "COMPRA" in estrategia.upper()) else "VENDA",
         "direcao": estrategia,
         "entrada": {"preco": entrada, "tipo": "Limite"},
         "stop_loss": {"preco": stop, "perda_percentual": risco_pct},
@@ -175,14 +199,14 @@ def calcular_setup_profissional(analise: Dict) -> Dict:
         ],
         "risco_recompensa": {"alvo_2": f"1:{round(ganho2_pct/risco_pct, 1)}" if risco_pct > 0 else "N/A"},
         "analise_detalhada": {
-            "confianca": setup_ia.get('confianca', 0),
-            "invalidacao": setup_ia.get('invalidacao', 'N/A')
+            "confianca": int(safe_float(setup_ia.get('confianca', 70))),
+            "invalidacao": str(setup_ia.get('invalidacao', 'N/A'))
         },
-        "padroes_identificados": analise.get('padroes_identificados', []),
+        "padroes_identificados": padroes,
         "padroes_reteste": analise.get('padroes_aguardando_reteste', []),
         "confluencias": {"lista": [], "forca": "Alta"},
         "smart_money": {
-            "fase": setup_ia.get('contexto_smc', "N/A"),
+            "fase": str(setup_ia.get('contexto_smc', "N/A")),
             "posicionamento": estrategia
         }
     }
@@ -384,7 +408,7 @@ def debug_status():
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "version": "3.6-multi-model"
+        "version": "3.7-safe-render"
     }
 
 if __name__ == "__main__":
