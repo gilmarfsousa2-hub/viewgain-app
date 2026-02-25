@@ -66,15 +66,10 @@ if anthropic_key:
 else:
     logger.warning("ANTHROPIC_API_KEY not found.")
 
-# Modelos atualizados com nomes verificados no ambiente (SDK v1beta)
+# Modelos simplificados para evitar correntes longas de fallback que causam timeout no Vercel
 MODELS_TO_TRY = [
-    'gemini-2.0-flash',     # Estável 2.0
-    'gemini-2.5-flash',     # Estável 2.5 (Verificado no ambiente)
-    'gemini-flash-latest',  # Alias para o mais recente estável
-    'gemini-3-flash-preview', # Preview 3.0
-    'gemini-2.5-pro',       # Pro 2.5
-    'gemini-3-pro-preview', # Preview 3.0 Pro
-    'gemini-pro-latest'     # Alias para o Pro mais recente
+    'gemini-2.0-flash',     # O mais rápido
+    'gemini-1.5-flash',     # Fallback estável
 ]
 
 PROMPT_ANALISE_PROFISSIONAL = """Analise este gráfico com MÁXIMA PRECISÃO de trader profissional (especialista em SMC e Price Action). 
@@ -164,6 +159,7 @@ def calcular_setup_profissional(analise: Dict) -> Dict:
 @app.post("/api/analyze")
 @app.post("/analyze")
 async def analyze_chart(file: UploadFile = File(...)):
+    start_time = time.time()
     if not client and not anthropic_client: 
         return {"success": False, "message": "Nenhuma API Key (Claude ou Gemini) configurada."}
     
@@ -179,9 +175,11 @@ async def analyze_chart(file: UploadFile = File(...)):
 
     # 2. Tentar Claude primeiro (se configurado)
     last_error = ""
+    used_claude = False
     if anthropic_client:
         try:
-            logger.info("Tentando Claude 3.5 Sonnet...")
+            used_claude = True
+            logger.info("Tentando Claude 3.5 Sonnet (Timeout 12s)...")
             base64_image = base64.b64encode(content).decode('utf-8')
             
             # Claude exige um prompt bem específico para JSON
@@ -190,6 +188,7 @@ async def analyze_chart(file: UploadFile = File(...)):
             message = anthropic_client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=2048,
+                timeout=12.0, # Limite agressivo para não estourar o Vercel
                 messages=[
                     {
                         "role": "user",
@@ -208,9 +207,7 @@ async def analyze_chart(file: UploadFile = File(...)):
                 ],
             )
             
-            # Extrair JSON da resposta do Claude
             response_text = message.content[0].text
-            # Limpar markdown se a IA colocar
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
@@ -222,22 +219,23 @@ async def analyze_chart(file: UploadFile = File(...)):
                 "provider": "Claude 3.5 Sonnet"
             }
             
-            ANALYSIS_CACHE[file_hash] = {
-                'timestamp': time.time(),
-                'result': result
-            }
+            ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
             save_cache()
+            logger.info(f"Análise Claude concluída em {time.time() - start_time:.2f}s")
             return result
             
         except Exception as e:
             last_error = f"Claude error: {str(e)}"
             logger.error(last_error)
 
-    # 3. Tentar Gemini como fallback
-    for model_name in MODELS_TO_TRY:
+    # 3. Tentar Gemini como fallback (Apenas modelos essenciais se Claude falhou ou não existe)
+    # Se já tentamos o Claude e deu erro, tentamos APENAS o Gemini mais rápido para evitar timeout acumulado
+    models_to_run = [MODELS_TO_TRY[0]] if used_claude else MODELS_TO_TRY
+    
+    for model_name in models_to_run:
         if not client: break
         try:
-            logger.info(f"Tentando {model_name}...")
+            logger.info(f"Tentando {model_name} (Fallback)...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=[types.Part.from_bytes(data=content, mime_type=file.content_type), PROMPT_ANALISE_PROFISSIONAL],
@@ -247,39 +245,20 @@ async def analyze_chart(file: UploadFile = File(...)):
             result = {
                 "success": True, 
                 "setup": calcular_setup_profissional(json.loads(response.text)),
-                "provider": f"Gemini ({model_name})"
+                "provider": f"Gemini ({model_name}) - Fallback" if used_claude else f"Gemini ({model_name})"
             }
             
-            # Salvar no cache
-            ANALYSIS_CACHE[file_hash] = {
-                'timestamp': time.time(),
-                'result': result
-            }
+            ANALYSIS_CACHE[file_hash] = {'timestamp': time.time(), 'result': result}
             save_cache()
-            
+            logger.info(f"Análise Gemini concluída em {time.time() - start_time:.2f}s")
             return result
         except Exception as e:
             last_error = str(e)
             logger.error(f"Erro com {model_name}: {last_error}")
-            
-            # Se for quota, tentar o próximo
-            if "429" in last_error or "Quota" in last_error or "RESOURCE_EXHAUSTED" in last_error:
-                logger.warning(f"Quota esgotada para {model_name}, tentando próximo...")
-                time.sleep(0.5)
-                continue
-            
-            # Se o modelo não existir, apenas pula silenciosamente (ou com log)
-            if "404" in last_error or "not found" in last_error.lower():
-                continue
+            if "429" in last_error: continue # Tenta o próximo se existir
+            break # Erros críticos param aqui
 
-            time.sleep(1)
-            continue
-
-    if "429" in last_error:
-        msg = "Cota Diária Gratuita do Google Esgotada. Tente novamente mais tarde ou mude de conta."
-    else:
-        msg = f"Erro na análise: {last_error}"
-        
+    msg = "Cota Esgotada ou Timeout. Tente novamente." if "429" in last_error else f"Erro: {last_error}"
     return {"success": False, "message": msg}
 
 @app.get("/")
