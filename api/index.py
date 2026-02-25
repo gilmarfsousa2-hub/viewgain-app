@@ -162,54 +162,99 @@ def calcular_setup_profissional(analise: Dict) -> Dict:
     estrategia = str(setup_ia.get('acao', 'AGUARDAR_RETESTE') or 'AGUARDAR_RETESTE')
     entrada = safe_float(setup_ia.get('entrada'), preco_atual)
     stop = safe_float(setup_ia.get('stop_loss'))
-    alvo1 = safe_float(setup_ia.get('alvo_1'))
-    alvo2 = safe_float(setup_ia.get('alvo_2'))
+def safe_int(val, default=0):
+    try:
+        if val is None: return default
+        if isinstance(val, (int, float)): return int(val)
+        return int(str(val).split('.')[0].strip())
+    except:
+        return default
+
+def safe_float(val, default=0.0):
+    try:
+        if val is None: return default
+        if isinstance(val, (int, float)): return float(val)
+        return float(str(val).replace(',', '.').strip())
+    except:
+        return default
+
+def normalize_setup(raw_setup):
+    """Garante que o setup tenha todos os campos e tipos corretos para não quebrar o frontend."""
+    if not isinstance(raw_setup, dict):
+        raw_setup = {}
     
-    risco_pontos = abs(entrada - stop) if stop > 0 and entrada > 0 else 0.0001
-    risco_pct = round((risco_pontos / entrada) * 100, 2) if entrada > 0 else 0.01
-    ganho1_pct = round((abs(alvo1 - entrada) / entrada) * 100, 2) if entrada > 0 else 0
-    ganho2_pct = round((abs(alvo2 - entrada) / entrada) * 100, 2) if entrada > 0 else 0
-    
-    # Normalizar padrões para evitar arrays com Nones ou campos faltando
+    # Normalização de Padrões
     padroes = []
-    for p in analise.get('padroes_identificados', []):
+    for p in raw_setup.get("padroes_identificados", []):
         if not isinstance(p, dict): continue
         padroes.append({
-            "nome": str(p.get('nome', 'Padrão Identificado')),
-            "categoria": str(p.get('categoria', 'ESTRUTURA')),
-            "estrelas": min(max(int(safe_float(p.get('estrelas', 1))), 1), 5), # Garante 1-5
-            "localizacao_contexto": str(p.get('localizacao_contexto', 'N/A')),
-            "localizacao_preco": str(p.get('localizacao_preco', 'N/A')),
-            "qualidade": str(p.get('qualidade', 'MEDIA')),
-            "descricao_visual": str(p.get('descricao_visual', 'N/A')),
-            "por_que_importante": str(p.get('por_que_importante', 'N/A')),
-            "volume_confirmacao": bool(p.get('volume_confirmacao', False)),
-            "volume_ratio": safe_float(p.get('volume_ratio', 1.0))
+            "nome": str(p.get("nome", "Padrão Identificado")),
+            "categoria": str(p.get("categoria", "SMC")),
+            "confiabilidade": str(p.get("confiabilidade", "ALTA")),
+            "qualidade": str(p.get("qualidade", "EXCELENTE")),
+            "estrelas": max(1, min(5, safe_int(p.get("estrelas"), 3))),
+            "localizacao_preco": safe_float(p.get("localizacao_preco"), 0.0),
+            "localizacao_contexto": str(p.get("localizacao_contexto", "Zona de Valor")),
+            "volume_confirmacao": bool(p.get("volume_confirmacao", False)),
+            "volume_ratio": safe_float(p.get("volume_ratio"), 1.0),
+            "relevancia": str(p.get("relevancia", "ALTA")),
+            "descricao_visual": str(p.get("descricao_visual", "Padrão visual detectado.")),
+            "por_que_importante": str(p.get("por_que_importante", "Confirma a direção do preço."))
         })
 
+    # Normalização de Reteste
+    retestes = []
+    for r in raw_setup.get("padroes_aguardando_reteste", []): # Changed from "padroes_reteste" to "padroes_aguardando_reteste" to match prompt
+        if not isinstance(r, dict): continue
+        retestes.append({
+            "nome": str(r.get("nome", "Padrão de Reteste")),
+            "onde_procurar": str(r.get("onde_procurar", "Zona de Liquidez")),
+            "como_identificar": str(r.get("como_identificar", "Aguardar rejeição")),
+            "confirmacao_necessaria": str(r.get("confirmacao_necessaria", "Candle de reversão"))
+        })
+
+    # Normalização Geral
+    setup_ia = raw_setup.get('setup', {})
+    if not isinstance(setup_ia, dict): setup_ia = {}
+
+    preco_atual = safe_float(raw_setup.get('ultimo_preco'))
+    estrategia = str(setup_ia.get('acao', 'AGUARDAR_RETESTE') or 'AGUARDAR_RETESTE')
+    entrada_preco = safe_float(setup_ia.get('entrada'), preco_atual)
+    stop_preco = safe_float(setup_ia.get('stop_loss'))
+    alvo1_preco = safe_float(setup_ia.get('alvo_1'))
+    alvo2_preco = safe_float(setup_ia.get('alvo_2'))
+    
+    risco_pontos = abs(entrada_preco - stop_preco) if stop_preco > 0 and entrada_preco > 0 else 0.0001
+    risco_pct = round((risco_pontos / entrada_preco) * 100, 2) if entrada_preco > 0 else 0.01
+    ganho1_pct = round((abs(alvo1_preco - entrada_preco) / entrada_preco) * 100, 2) if entrada_preco > 0 else 0
+    ganho2_pct = round((abs(alvo2_preco - entrada_preco) / entrada_preco) * 100, 2) if entrada_preco > 0 else 0
+
     return {
-        "status": "SETUP_PROFISSIONAL",
-        "operacao": "COMPRA" if (alvo1 > entrada or "COMPRA" in estrategia.upper()) else "VENDA",
+        "status": "SETUP_PROFISSIONAL", # Hardcoded as per original calcular_setup_profissional
+        "operacao": "COMPRA" if (alvo1_preco > entrada_preco or "COMPRA" in estrategia.upper()) else "VENDA",
         "direcao": estrategia,
-        "entrada": {"preco": entrada, "tipo": "Limite"},
-        "stop_loss": {"preco": stop, "perda_percentual": risco_pct},
+        "entrada": {"preco": entrada_preco, "tipo": "Limite"},
+        "stop_loss": {"preco": stop_preco, "perda_percentual": risco_pct},
         "alvos": [
-            {"nome": "Alvo 1", "preco": alvo1, "ganho_percentual": ganho1_pct},
-            {"nome": "Alvo 2", "preco": alvo2, "ganho_percentual": ganho2_pct}
+            {"nome": "Alvo 1", "preco": alvo1_preco, "ganho_percentual": ganho1_pct},
+            {"nome": "Alvo 2", "preco": alvo2_preco, "ganho_percentual": ganho2_pct}
         ],
         "risco_recompensa": {"alvo_2": f"1:{round(ganho2_pct/risco_pct, 1)}" if risco_pct > 0 else "N/A"},
         "analise_detalhada": {
-            "confianca": int(safe_float(setup_ia.get('confianca', 70))),
+            "confianca": safe_int(setup_ia.get('confianca', 70)),
             "invalidacao": str(setup_ia.get('invalidacao', 'N/A'))
         },
         "padroes_identificados": padroes,
-        "padroes_reteste": analise.get('padroes_aguardando_reteste', []),
-        "confluencias": {"lista": [], "forca": "Alta"},
+        "padroes_reteste": retestes,
+        "confluencias": {"lista": [], "forca": "Alta"}, # Kept as per original calcular_setup_profissional
         "smart_money": {
             "fase": str(setup_ia.get('contexto_smc', "N/A")),
             "posicionamento": estrategia
         }
     }
+
+def calcular_setup_profissional(analise: Dict) -> Dict:
+    return normalize_setup(analise)
 
 @app.post("/api/analyze")
 @app.post("/analyze")
@@ -408,7 +453,7 @@ def debug_status():
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "version": "3.8-global-safety"
+        "version": "3.9-safe-cast"
     }
 
 if __name__ == "__main__":
