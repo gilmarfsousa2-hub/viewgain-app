@@ -225,7 +225,7 @@ async def analyze_chart(file: UploadFile = File(...)):
                 claude_prompt = f"{PROMPT_ANALISE_PROFISSIONAL}\nResponda APENAS o JSON."
                 
                 message = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-5-sonnet-latest",
                     max_tokens=2048,
                     timeout=25.0,
                     messages=[
