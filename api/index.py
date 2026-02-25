@@ -412,6 +412,24 @@ def health_check():
         "cache_entries": len(ANALYSIS_CACHE)
     }
 
+@app.get("/api/test-claude-verbose")
+@app.get("/test-claude-verbose")
+async def test_claude_verbose():
+    if not anthropic_client: return {"success": False, "message": "Cliente não inicializado"}
+    results = {}
+    for model_id in ["claude-3-5-sonnet-latest", "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620", "claude-3-haiku-20240307"]:
+        try:
+            start = time.time()
+            anthropic_client.messages.create(
+                model=model_id,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "olá"}]
+            )
+            results[model_id] = {"status": "success", "time": f"{time.time()-start:.2f}s"}
+        except Exception as e:
+            results[model_id] = {"status": "error", "message": str(e)}
+    return {"results": results, "version": "3.9-diagnostic"}
+
 @app.get("/api/test-claude")
 @app.get("/test-claude")
 async def test_claude():
