@@ -330,10 +330,15 @@ async def test_claude():
     if not anthropic_client: return {"success": False, "message": "Cliente não inicializado"}
     start = time.time()
     try:
-        anthropic_client.models.list() # Teste de conexão simples
-        return {"success": True, "time": f"{time.time()-start:.2f}s"}
+        # Testar criação de mensagem simples para validar o modelo
+        msg = anthropic_client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "olá"}]
+        )
+        return {"success": True, "time": f"{time.time()-start:.2f}s", "model": "claude-3-5-sonnet-20241022"}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "note": "Se erro for 404, o modelo pode não estar disponível para esta conta."}
 
 @app.get("/api/debug")
 @app.get("/debug")
