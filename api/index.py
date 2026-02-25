@@ -283,7 +283,19 @@ async def analyze_chart(file: UploadFile = File(...)):
     return {"success": False, "message": msg}
 
 @app.get("/")
-def health_check(): return {"status": "online"}
+def health_check(): return {"status": "online", "version": "3.1-debug"}
+
+@app.get("/api/debug")
+@app.get("/debug")
+def debug_status():
+    return {
+        "anthropic_key_present": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "gemini_key_present": bool(os.getenv("GEMINI_API_KEY")),
+        "node_env": os.getenv("NODE_ENV"),
+        "vercel_env": os.getenv("VERCEL_ENV"),
+        "anthropic_client_initialized": anthropic_client is not None,
+        "gemini_client_initialized": client is not None
+    }
 
 if __name__ == "__main__":
     import uvicorn
