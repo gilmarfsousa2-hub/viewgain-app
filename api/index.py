@@ -83,14 +83,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = os.getenv("GEMINI_API_KEY", "").strip()
 client = None
 if api_key:
     client = genai.Client(api_key=api_key)
 else:
     logger.warning("GEMINI_API_KEY not found.")
 
-anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
 anthropic_client = None
 if anthropic_key:
     anthropic_client = anthropic.Anthropic(api_key=anthropic_key)
