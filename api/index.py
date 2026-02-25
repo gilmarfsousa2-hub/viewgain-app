@@ -408,7 +408,7 @@ def debug_status():
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "version": "3.7-safe-render"
+        "version": "3.8-global-safety"
     }
 
 if __name__ == "__main__":
