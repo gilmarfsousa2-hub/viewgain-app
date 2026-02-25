@@ -338,13 +338,20 @@ async def test_claude():
 @app.get("/api/debug")
 @app.get("/debug")
 def debug_status():
+    def mask_key(k):
+        if not k: return None
+        return f"{k[:4]}...{k[-4:]}"
+    
     return {
         "anthropic_key_present": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "anthropic_key_mask": mask_key(os.getenv("ANTHROPIC_API_KEY")),
         "gemini_key_present": bool(os.getenv("GEMINI_API_KEY")),
+        "gemini_key_mask": mask_key(os.getenv("GEMINI_API_KEY")),
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "gemini_client_initialized": client is not None
+        "gemini_client_initialized": client is not None,
+        "version": "3.3-diagnostic"
     }
 
 if __name__ == "__main__":
