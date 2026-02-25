@@ -332,13 +332,13 @@ async def test_claude():
     try:
         # Testar criação de mensagem simples para validar o modelo
         msg = anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-5-sonnet-latest",
             max_tokens=10,
             messages=[{"role": "user", "content": "olá"}]
         )
-        return {"success": True, "time": f"{time.time()-start:.2f}s", "model": "claude-3-5-sonnet-20241022"}
+        return {"success": True, "time": f"{time.time()-start:.2f}s", "model": "claude-3-5-sonnet-latest", "version": "3.5"}
     except Exception as e:
-        return {"success": False, "error": str(e), "note": "Se erro for 404, o modelo pode não estar disponível para esta conta."}
+        return {"success": False, "error": str(e), "note": "Se erro for 404, tente claude-3-5-sonnet-20240620 no painel."}
 
 @app.get("/api/debug")
 @app.get("/debug")
@@ -359,7 +359,7 @@ def debug_status():
         "node_env": os.getenv("NODE_ENV"),
         "vercel_env": os.getenv("VERCEL_ENV"),
         "anthropic_client_initialized": anthropic_client is not None,
-        "version": "3.4-strip-check"
+        "version": "3.5-latest-fix"
     }
 
 if __name__ == "__main__":
